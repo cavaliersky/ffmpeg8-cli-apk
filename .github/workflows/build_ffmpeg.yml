@@ -1,4 +1,4 @@
-name: Build FFmpeg 8.1 Android (GK6323 H264+H265 硬编)
+name: Build FFmpeg 8.1 Android APK (H264+H265硬编)
 
 on:
   workflow_dispatch:
@@ -14,11 +14,12 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential wget unzip zip
 
-      - name: 下载 Android NDK r27（官方镜像，永不失效）
+      # --------------- 修复 404 这里 ---------------
+      - name: 下载 Android NDK r25c（官方正确地址）
         run: |
-          wget -O ndk.zip https://dl.google.com/android/repository/android-ndk-r27-linux-x86_64.zip
+          wget -O ndk.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q ndk.zip
-          mv android-ndk-r27 ndk
+          mv android-ndk-r25c ndk
 
       - name: 下载 FFmpeg 8.1
         run: |
@@ -26,7 +27,7 @@ jobs:
           tar xf ffmpeg.tar.gz
           mv ffmpeg-8.1 ffmpeg
 
-      - name: 编译 FFmpeg 8.1 ARMv7a (GK6323)
+      - name: 编译 FFmpeg 8.1 armv7a（开启H264+H265硬编）
         run: |
           cd ffmpeg
           NDK=$GITHUB_WORKSPACE/ndk
@@ -52,33 +53,34 @@ jobs:
             --disable-network \
             --disable-everything \
             --enable-decoder=h264,hevc,mpeg4 \
-            --enable-encoder=h264_mediacodec,hevc_mediac264_mediacodec \
+            --enable-encoder=h264_mediacodec,hevc_mediacodec \
             --enable-hwaccel=h264_mediacodec,hevc_mediacodec \
-            --enable-filter=scale,concat \
-            --enable-muxer=mp4 --enable-demuxer=mp4 \
+            --enable-filter=scale,trim,concat \
+            --enable-muxer=mp4 \
+            --enable-demuxer=mp4,mov \
             --enable-protocol=file
 
           make -j4
           make install
           cd ..
 
-      - name: 下载安卓 CLI 模板
+      - name: 下载安卓CLI模板并替换ffmpeg
         run: |
           git clone https://github.com/ethanhua/FFmpeg-Android-CLI.git
           cp build/bin/ffmpeg FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
           chmod +x FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
 
-      - name: 打包 APK
+      - name: 打包APK
         run: |
           cd FFmpeg-Android-CLI
           chmod +x gradlew
           ./gradlew assembleRelease
           cd ..
           mkdir -p output
-          cp FFmpeg-Android-CLI/app/build/outputs/apk/release/app-release.apk output/FFmpeg81_GK6323.apk
+          cp FFmpeg-Android-CLI/app/build/outputs/apk/release/app-release.apk output/FFmpeg_8.1_H265.apk
 
-      - name: 上传 APK
+      - name: 上传APK
         uses: actions/upload-artifact@v4
         with:
-          name: FFmpeg-8.1-APK
+          name: FFmpeg_8.1_APK
           path: output/
