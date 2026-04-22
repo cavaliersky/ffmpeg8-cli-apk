@@ -1,4 +1,4 @@
-name: FFmpeg 8.1 Android CLI APK (H264+H265 硬编)
+name: FFmpeg 8.1 Android CLI APK (FULL AUTO)
 
 on:
   workflow_dispatch:
@@ -8,13 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 拉代码
-        uses: actions/checkout@v4
-
       - name: 安装依赖
         run: |
           sudo apt update
-          sudo apt install -y wget unzip zip git
+          sudo apt install -y wget unzip zip git openjdk-17-jdk
 
       # =========================
       # 下载 NDK
@@ -35,9 +32,9 @@ jobs:
           mv ffmpeg-8.1 ffmpeg
 
       # =========================
-      # 编译 FFmpeg（关键修复）
+      # 编译 FFmpeg（已修复 strip）
       # =========================
-      - name: 编译 FFmpeg (armv7a-neon)
+      - name: 编译 FFmpeg
         run: |
           cd ffmpeg
 
@@ -72,37 +69,107 @@ jobs:
           make install
 
       # =========================
-      # 下载 CLI 模板
+      # 创建最小 Android 工程
       # =========================
-      - name: 下载极简 CLI 模板
+      - name: 创建 Android 项目
         run: |
-          git clone https://github.com/ethanhua/FFmpeg-Android-CLI.git
+          mkdir -p project/app/src/main/assets
+          mkdir -p project/app/src/main/java/com/example/ffmpegcli
+
+          cd project
+
+          # settings.gradle
+          echo "include ':app'" > settings.gradle
+
+          # 根 build.gradle
+          cat > build.gradle << 'EOF'
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:7.0.0'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          EOF
+
+          # app/build.gradle
+          mkdir -p app
+          cat > app/build.gradle << 'EOF'
+          apply plugin: 'com.android.application'
+
+          android {
+              compileSdkVersion 30
+
+              defaultConfig {
+                  applicationId "com.example.ffmpegcli"
+                  minSdkVersion 24
+                  targetSdkVersion 30
+                  versionCode 1
+                  versionName "1.0"
+              }
+          }
+          EOF
+
+          # AndroidManifest
+          mkdir -p app/src/main
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.example.ffmpegcli">
+
+              <application
+                  android:label="FFmpeg CLI"
+                  android:hasCode="false" />
+
+          </manifest>
+          EOF
 
       # =========================
-      # 放入 ffmpeg 二进制
+      # 放入 ffmpeg
       # =========================
       - name: 拷贝 ffmpeg
         run: |
-          cp out/bin/ffmpeg FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
-          chmod +x FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
+          cp out/bin/ffmpeg project/app/src/main/assets/ffmpeg
+          chmod +x project/app/src/main/assets/ffmpeg
+
+      # =========================
+      # 安装 Gradle
+      # =========================
+      - name: 安装 Gradle
+        run: |
+          wget https://services.gradle.org/distributions/gradle-7.5-bin.zip
+          unzip -q gradle-7.5-bin.zip
+          mv gradle-7.5 gradle
+
+          cat > gradlew << 'EOF'
+          #!/bin/bash
+          ./gradle/bin/gradle "$@"
+          EOF
+
+          chmod +x gradlew
 
       # =========================
       # 构建 APK
       # =========================
       - name: 构建 APK
         run: |
-          cd FFmpeg-Android-CLI
-          chmod +x gradlew
-          ./gradlew assembleRelease
-          cd ..
+          cd project
+          ../gradlew assembleDebug
 
       # =========================
-      # 收集产物
+      # 导出 APK
       # =========================
-      - name: 收集 APK
+      - name: 导出 APK
         run: |
           mkdir -p dist
-          cp FFmpeg-Android-CLI/app/build/outputs/apk/release/app-release.apk dist/FFmpeg81_HW.apk
+          cp project/app/build/outputs/apk/debug/app-debug.apk dist/FFmpeg81.apk
 
       # =========================
       # 上传
@@ -111,4 +178,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FFmpeg-Android-APK
-          path: dist/FFmpeg81_HW.apk
+          path: dist/FFmpeg81.apk
