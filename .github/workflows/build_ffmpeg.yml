@@ -1,4 +1,4 @@
-name: Build FFmpeg 8.1 Android APK (GK6323 H264+H265硬编)
+name: Build FFmpeg 8.1 Android (GK6323 H264+H265硬编)
 
 on:
   workflow_dispatch:
@@ -50,8 +50,6 @@ jobs:
             --enable-shared \
             --disable-doc \
             --disable-network \
-            --disable-libavdevice \
-            --disable-everything \
             --enable-decoder=h264,hevc,mpeg4 \
             --enable-encoder=h264_mediacodec,hevc_mediacodec \
             --enable-hwaccel=h264_mediacodec,hevc_mediacodec \
