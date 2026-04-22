@@ -1,4 +1,4 @@
-name: FFmpeg CLI APK (UI + RUN)
+name: FFmpeg CLI APK (FULL FINAL)
 
 on:
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
           make install
 
       # =========================
-      # 创建 Android 项目（核心）
+      # 创建 Android 项目
       # =========================
       - name: 创建项目
         run: |
@@ -102,10 +102,13 @@ jobs:
           }
           EOF
 
-          # Manifest
+          # Manifest（权限已加）
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.ffmpegcli">
+
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 
               <application android:label="FFmpeg CLI">
                   <activity android:name=".MainActivity">
@@ -119,7 +122,7 @@ jobs:
           </manifest>
           EOF
 
-          # UI 布局
+          # UI（可复制日志）
           cat > app/src/main/res/layout/activity_main.xml << 'EOF'
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
               android:orientation="vertical"
@@ -139,23 +142,20 @@ jobs:
                   android:layout_width="match_parent"
                   android:layout_height="wrap_content"/>
 
-              <ScrollView
+              <EditText
+                  android:id="@+id/log"
                   android:layout_width="match_parent"
                   android:layout_height="0dp"
-                  android:layout_weight="1">
-
-                  <TextView
-                      android:id="@+id/log"
-                      android:textSize="12sp"
-                      android:layout_width="match_parent"
-                      android:layout_height="wrap_content"/>
-
-              </ScrollView>
+                  android:layout_weight="1"
+                  android:textIsSelectable="true"
+                  android:inputType="textMultiLine"
+                  android:gravity="top"
+                  android:scrollbars="vertical"/>
 
           </LinearLayout>
           EOF
 
-          # Java 代码（核心逻辑）
+          # Java（权限 + 可复制日志）
           cat > app/src/main/java/com/example/ffmpegcli/MainActivity.java << 'EOF'
           package com.example.ffmpegcli;
 
@@ -164,18 +164,33 @@ jobs:
           import android.widget.*;
           import java.io.*;
 
+          import android.Manifest;
+          import android.content.pm.PackageManager;
+          import android.os.Build;
+
           public class MainActivity extends Activity {
 
-              TextView logView;
+              EditText logView;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
                   setContentView(R.layout.activity_main);
 
+                  if (Build.VERSION.SDK_INT >= 23) {
+                      if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                          requestPermissions(new String[]{
+                                  Manifest.permission.READ_EXTERNAL_STORAGE,
+                                  Manifest.permission.WRITE_EXTERNAL_STORAGE
+                          }, 1);
+                      }
+                  }
+
                   EditText input = findViewById(R.id.input);
                   Button run = findViewById(R.id.run);
                   logView = findViewById(R.id.log);
+
+                  logView.setKeyListener(null); // 禁止编辑
 
                   String ffmpegPath = copyFFmpeg();
 
@@ -220,13 +235,16 @@ jobs:
               }
 
               private void append(String s) {
-                  runOnUiThread(() -> logView.append(s + "\n"));
+                  runOnUiThread(() -> {
+                      logView.append(s + "\n");
+                      logView.setSelection(logView.getText().length());
+                  });
               }
           }
           EOF
 
       # =========================
-      # 放入 ffmpeg
+      # ffmpeg
       # =========================
       - name: 拷贝 ffmpeg
         run: |
@@ -256,9 +274,6 @@ jobs:
         run: |
           ./gradlew -p project assembleDebug
 
-      # =========================
-      # 输出
-      # =========================
       - name: 导出 APK
         run: |
           mkdir -p dist
