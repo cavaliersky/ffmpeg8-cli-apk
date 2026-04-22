@@ -6,29 +6,41 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: 拉代码
+        uses: actions/checkout@v4
 
       - name: 安装依赖
         run: |
           sudo apt update
-          sudo apt install -y wget unzip zip
+          sudo apt install -y wget unzip zip git
 
+      # =========================
+      # 下载 NDK
+      # =========================
       - name: 下载 NDK r25c
         run: |
           wget -O ndk.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q ndk.zip
           mv android-ndk-r25c ndk
 
+      # =========================
+      # 下载 FFmpeg
+      # =========================
       - name: 下载 FFmpeg 8.1
         run: |
           wget -O ffmpeg.tar.gz https://ffmpeg.org/releases/ffmpeg-8.1.tar.gz
           tar xf ffmpeg.tar.gz
           mv ffmpeg-8.1 ffmpeg
 
-      - name: 编译 FFmpeg 8.1 (armv7a-neon)
+      # =========================
+      # 编译 FFmpeg（关键修复）
+      # =========================
+      - name: 编译 FFmpeg (armv7a-neon)
         run: |
           cd ffmpeg
+
           NDK=$GITHUB_WORKSPACE/ndk
           API=24
           TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64
@@ -44,41 +56,59 @@ jobs:
             --enable-neon \
             --enable-mediacodec \
             --enable-jni \
-            --enable-hwaccels \
             --enable-ffmpeg \
-            --disable-static \
-            --enable-shared \
+            --enable-static \
+            --disable-shared \
             --disable-doc \
-            --disable-network \
+            --disable-stripping \
             --enable-decoder=h264,hevc \
             --enable-encoder=h264_mediacodec,hevc_mediacodec \
-            --enable-hwaccel=h264_mediacodec,hevc_mediacodec \
-            --enable-filter=scale,concat \
+            --enable-filter=scale \
             --enable-muxer=mp4 \
             --enable-demuxer=mp4 \
             --enable-protocol=file
 
           make -j4
           make install
-          cd ..
 
+      # =========================
+      # 下载 CLI 模板
+      # =========================
       - name: 下载极简 CLI 模板
         run: |
           git clone https://github.com/ethanhua/FFmpeg-Android-CLI.git
+
+      # =========================
+      # 放入 ffmpeg 二进制
+      # =========================
+      - name: 拷贝 ffmpeg
+        run: |
           cp out/bin/ffmpeg FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
           chmod +x FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
 
+      # =========================
+      # 构建 APK
+      # =========================
       - name: 构建 APK
         run: |
           cd FFmpeg-Android-CLI
           chmod +x gradlew
           ./gradlew assembleRelease
           cd ..
+
+      # =========================
+      # 收集产物
+      # =========================
+      - name: 收集 APK
+        run: |
           mkdir -p dist
           cp FFmpeg-Android-CLI/app/build/outputs/apk/release/app-release.apk dist/FFmpeg81_HW.apk
 
+      # =========================
+      # 上传
+      # =========================
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: FFmpeg-Android-APK
-          path: dist/
+          path: dist/FFmpeg81_HW.apk
