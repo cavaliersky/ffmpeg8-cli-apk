@@ -1,0 +1,85 @@
+name: Build FFmpeg 8.1 Android APK (硬编版)
+
+on:
+  workflow_dispatch:    # 手动点一下就跑
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载源码
+        uses: actions/checkout@v4
+
+      - name: 安装环境
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential wget unzip zip
+
+      - name: 下载 NDK
+        run: |
+          wget -O ndk.zip https://dl.google.com/android/repository/android-ndk-r25c-linux-x86_64.zip
+          unzip -q ndk.zip
+          mv android-ndk-r25c ndk
+
+      - name: 下载 FFmpeg 8.1
+        run: |
+          wget -O ffmpeg.tar.gz https://ffmpeg.org/releases/ffmpeg-8.1.tar.gz
+          tar xf ffmpeg.tar.gz
+          mv ffmpeg-8.1 ffmpeg
+
+      - name: 编译 FFmpeg 8.1 (ARMv7a, 你的盒子 GK6323)
+        run: |
+          cd ffmpeg
+          NDK=$GITHUB_WORKSPACE/ndk
+          API=24
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          
+          ./configure \
+            --prefix=$GITHUB_WORKSPACE/build \
+            --target-os=android \
+            --arch=arm \
+            --cpu=armv7a \
+            --cc=$TOOLCHAIN/bin/armv7a-linux-androideabi$API-clang \
+            --cxx=$TOOLCHAIN/bin/armv7a-linux-androideabi$API-clang++ \
+            --enable-cross-compile \
+            --enable-neon \
+            --enable-mediacodec \
+            --enable-jni \
+            --enable-hwaccels \
+            --enable-ffmpeg \
+            --disable-static \
+            --enable-shared \
+            --disable-doc \
+            --disable-network \
+            --disable-everything \
+            --enable-decoder=h264,hevc,mpeg4 \
+            --enable-encoder=h264_mediacodec,hevc_mediacodec \
+            --enable-hwaccel=h264_mediacodec,hevc_mediacodec \
+            --enable-filter=scale,concat \
+            --enable-muxer=mp4 --enable-demuxer=mp4 \
+            --enable-protocol=file
+          
+          make -j4
+          make install
+          cd ..
+
+      - name: 下载安卓命令行模板APK
+        run: |
+          git clone https://github.com/ethanhua/FFmpeg-Android-CLI.git
+          cp build/bin/ffmpeg FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
+          chmod +x FFmpeg-Android-CLI/app/src/main/assets/ffmpeg
+
+      - name: 打包生成最终APK
+        run: |
+          cd FFmpeg-Android-CLI
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          cd ..
+          mkdir -p output
+          cp FFmpeg-Android-CLI/app/build/outputs/apk/release/app-release.apk output/FFmpeg81_HWEncode_GK6323.apk
+
+      - name: 上传APK供下载
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFmpeg-8.1-Android-HWEncode-APK
+          path: output/
