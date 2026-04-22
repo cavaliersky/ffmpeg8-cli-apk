@@ -1,4 +1,4 @@
-name: FFmpeg 8.1 Android CLI APK (FULL AUTO)
+name: FFmpeg CLI APK (UI + RUN)
 
 on:
   workflow_dispatch:
@@ -14,26 +14,23 @@ jobs:
           sudo apt install -y wget unzip zip git openjdk-17-jdk
 
       # =========================
-      # 下载 NDK
+      # NDK
       # =========================
-      - name: 下载 NDK r25c
+      - name: 下载 NDK
         run: |
           wget -O ndk.zip https://dl.google.com/android/repository/android-ndk-r25c-linux.zip
           unzip -q ndk.zip
           mv android-ndk-r25c ndk
 
       # =========================
-      # 下载 FFmpeg
+      # FFmpeg
       # =========================
-      - name: 下载 FFmpeg 8.1
+      - name: 下载 FFmpeg
         run: |
           wget -O ffmpeg.tar.gz https://ffmpeg.org/releases/ffmpeg-8.1.tar.gz
           tar xf ffmpeg.tar.gz
           mv ffmpeg-8.1 ffmpeg
 
-      # =========================
-      # 编译 FFmpeg（已修复 strip）
-      # =========================
       - name: 编译 FFmpeg
         run: |
           cd ffmpeg
@@ -48,7 +45,6 @@ jobs:
             --arch=arm \
             --cpu=armv7a \
             --cc=$TC/bin/armv7a-linux-androideabi$API-clang \
-            --cxx=$TC/bin/armv7a-linux-androideabi$API-clang++ \
             --enable-cross-compile \
             --enable-neon \
             --enable-mediacodec \
@@ -59,7 +55,6 @@ jobs:
             --disable-doc \
             --disable-stripping \
             --enable-decoder=h264,hevc \
-            --enable-encoder=h264_mediacodec,hevc_mediacodec \
             --enable-filter=scale \
             --enable-muxer=mp4 \
             --enable-demuxer=mp4 \
@@ -69,39 +64,28 @@ jobs:
           make install
 
       # =========================
-      # 创建最小 Android 工程
+      # 创建 Android 项目（核心）
       # =========================
-      - name: 创建 Android 项目
+      - name: 创建项目
         run: |
-          mkdir -p project/app/src/main/assets
           mkdir -p project/app/src/main/java/com/example/ffmpegcli
+          mkdir -p project/app/src/main/res/layout
+          mkdir -p project/app/src/main/assets
 
           cd project
 
-          # settings.gradle
           echo "include ':app'" > settings.gradle
 
-          # 根 build.gradle
           cat > build.gradle << 'EOF'
           buildscript {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:7.0.0'
-              }
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:7.0.0' }
           }
           allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+              repositories { google(); mavenCentral() }
           }
           EOF
 
-          # app/build.gradle
-          mkdir -p app
           cat > app/build.gradle << 'EOF'
           apply plugin: 'com.android.application'
 
@@ -118,17 +102,127 @@ jobs:
           }
           EOF
 
-          # AndroidManifest
-          mkdir -p app/src/main
+          # Manifest
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.example.ffmpegcli">
 
-              <application
-                  android:label="FFmpeg CLI"
-                  android:hasCode="false" />
+              <application android:label="FFmpeg CLI">
+                  <activity android:name=".MainActivity">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
 
           </manifest>
+          EOF
+
+          # UI 布局
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:orientation="vertical"
+              android:padding="8dp"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent">
+
+              <EditText
+                  android:id="@+id/input"
+                  android:hint="输入 ffmpeg 命令"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"/>
+
+              <Button
+                  android:id="@+id/run"
+                  android:text="运行"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"/>
+
+              <ScrollView
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1">
+
+                  <TextView
+                      android:id="@+id/log"
+                      android:textSize="12sp"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"/>
+
+              </ScrollView>
+
+          </LinearLayout>
+          EOF
+
+          # Java 代码（核心逻辑）
+          cat > app/src/main/java/com/example/ffmpegcli/MainActivity.java << 'EOF'
+          package com.example.ffmpegcli;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.widget.*;
+          import java.io.*;
+
+          public class MainActivity extends Activity {
+
+              TextView logView;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  setContentView(R.layout.activity_main);
+
+                  EditText input = findViewById(R.id.input);
+                  Button run = findViewById(R.id.run);
+                  logView = findViewById(R.id.log);
+
+                  String ffmpegPath = copyFFmpeg();
+
+                  run.setOnClickListener(v -> {
+                      logView.setText("");
+                      new Thread(() -> runCmd(ffmpegPath + " " + input.getText().toString())).start();
+                  });
+              }
+
+              private String copyFFmpeg() {
+                  File file = new File(getFilesDir(), "ffmpeg");
+                  if (file.exists()) return file.getAbsolutePath();
+
+                  try {
+                      InputStream in = getAssets().open("ffmpeg");
+                      FileOutputStream out = new FileOutputStream(file);
+                      byte[] buf = new byte[4096];
+                      int len;
+                      while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
+                      in.close();
+                      out.close();
+                      file.setExecutable(true);
+                  } catch (Exception e) {}
+
+                  return file.getAbsolutePath();
+              }
+
+              private void runCmd(String cmd) {
+                  try {
+                      Process p = Runtime.getRuntime().exec(cmd);
+
+                      BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
+                      BufferedReader er = new BufferedReader(new InputStreamReader(p.getErrorStream()));
+
+                      String line;
+                      while ((line = br.readLine()) != null) append(line);
+                      while ((line = er.readLine()) != null) append(line);
+
+                  } catch (Exception e) {
+                      append(e.toString());
+                  }
+              }
+
+              private void append(String s) {
+                  runOnUiThread(() -> logView.append(s + "\n"));
+              }
+          }
           EOF
 
       # =========================
@@ -140,7 +234,7 @@ jobs:
           chmod +x project/app/src/main/assets/ffmpeg
 
       # =========================
-      # 安装 Gradle
+      # Gradle
       # =========================
       - name: 安装 Gradle
         run: |
@@ -150,32 +244,28 @@ jobs:
 
           cat > gradlew << 'EOF'
           #!/bin/bash
-          ./gradle/bin/gradle "$@"
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          "$DIR/gradle/bin/gradle" "$@"
           EOF
-
           chmod +x gradlew
 
       # =========================
-      # 构建 APK
+      # 构建
       # =========================
       - name: 构建 APK
         run: |
-          cd project
-          ../gradlew assembleDebug
+          ./gradlew -p project assembleDebug
 
       # =========================
-      # 导出 APK
+      # 输出
       # =========================
       - name: 导出 APK
         run: |
           mkdir -p dist
-          cp project/app/build/outputs/apk/debug/app-debug.apk dist/FFmpeg81.apk
+          cp project/app/build/outputs/apk/debug/app-debug.apk dist/ffmpeg-cli.apk
 
-      # =========================
-      # 上传
-      # =========================
-      - name: 上传 APK
+      - name: 上传
         uses: actions/upload-artifact@v4
         with:
-          name: FFmpeg-Android-APK
-          path: dist/FFmpeg81.apk
+          name: ffmpeg-cli
+          path: dist/ffmpeg-cli.apk
